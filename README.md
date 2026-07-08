@@ -467,7 +467,7 @@ visualization/screenshots/
 
 | Business Question | Kullanılan Fact View | Kullanılan Dimension |
 |---|---|---|
-| Monthly revenue | `fact_payments` | Date / `order_purchase_timestamp` |
+| Monthly revenue | `fact_payments` | `order_purchase_timestamp` |
 | Revenue by product category | `fact_order_items` | `dim_product` |
 | Top-performing sellers | `fact_order_items` | `dim_seller` |
 | Sales by customer state | `fact_payments` | `dim_customer` |
