@@ -27,3 +27,5 @@ _SUCCESS
 logs/
 dbt_olist/target/
 dbt_olist/logs/
+dbt_olist/.user.yml
+orchestration/dags/__pycache__/
