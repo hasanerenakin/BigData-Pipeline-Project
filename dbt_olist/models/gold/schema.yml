@@ -1,0 +1,101 @@
+version: 2
+
+models:
+  - name: dim_customer
+    description: Customer dimension for customer identity and location attributes.
+    columns:
+      - name: customer_id
+        description: Unique customer identifier.
+        tests:
+          - not_null
+          - unique
+
+  - name: dim_product
+    description: Product dimension with product category and translated category name.
+    columns:
+      - name: product_id
+        description: Unique product identifier.
+        tests:
+          - not_null
+          - unique
+
+  - name: dim_seller
+    description: Seller dimension for seller identity and location attributes.
+    columns:
+      - name: seller_id
+        description: Unique seller identifier.
+        tests:
+          - not_null
+          - unique
+
+  - name: dim_payment_type
+    description: Payment type dimension.
+    columns:
+      - name: payment_type
+        description: Payment method used by the customer.
+        tests:
+          - not_null
+
+  - name: dim_order_status
+    description: Order status dimension.
+    columns:
+      - name: order_status
+        description: Current status of the order.
+        tests:
+          - not_null
+
+  - name: fact_order_items
+    description: Order item fact view used for revenue by product category and seller performance analysis.
+    columns:
+      - name: order_id
+        description: Order identifier.
+        tests:
+          - not_null
+      - name: product_id
+        description: Product identifier.
+        tests:
+          - not_null
+      - name: seller_id
+        description: Seller identifier.
+        tests:
+          - not_null
+
+  - name: fact_payments
+    description: Payment fact view used for monthly revenue and payment method trend analysis.
+    columns:
+      - name: order_id
+        description: Order identifier.
+        tests:
+          - not_null
+      - name: payment_type
+        description: Payment method.
+        tests:
+          - not_null
+      - name: payment_value
+        description: Payment value for the order.
+        tests:
+          - not_null
+
+  - name: fact_delivery
+    description: Delivery fact view used for average delivery time analysis by state.
+    columns:
+      - name: order_id
+        description: Order identifier.
+        tests:
+          - not_null
+      - name: delivery_days
+        description: Number of days between purchase and customer delivery.
+        tests:
+          - not_null
+
+  - name: fact_review_items
+    description: Review fact view used for average review score analysis by product category.
+    columns:
+      - name: review_id
+        description: Review identifier.
+        tests:
+          - not_null
+      - name: review_score
+        description: Customer review score.
+        tests:
+          - not_null

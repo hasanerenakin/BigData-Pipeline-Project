@@ -22,3 +22,8 @@ Thumbs.db
 *.crc
 _SUCCESS
 
+
+# Airflow and dbt generated files
+logs/
+dbt_olist/target/
+dbt_olist/logs/

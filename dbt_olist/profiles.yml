@@ -1,0 +1,12 @@
+olist_dbt:
+  target: dev
+  outputs:
+    dev:
+      type: spark
+      method: thrift
+      host: spark-thriftserver
+      port: 10000
+      schema: olist
+      user: hive
+      connect_retries: 3
+      connect_timeout: 60

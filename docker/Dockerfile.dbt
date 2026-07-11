@@ -1,0 +1,20 @@
+FROM python:3.11-slim
+
+USER root
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    gcc \
+    git \
+    libsasl2-dev \
+    libsasl2-modules \
+    sasl2-bin \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir \
+    "dbt-core==1.8.9" \
+    "dbt-spark[PyHive]==1.8.0"
+
+WORKDIR /app/dbt_olist
+
+CMD ["sleep", "infinity"]

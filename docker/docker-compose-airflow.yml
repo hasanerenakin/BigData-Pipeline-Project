@@ -1,0 +1,84 @@
+version: '3.8'
+
+x-airflow-common: &airflow-common
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile.airflow
+  image: olist-airflow:latest
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+  volumes:
+    - ../orchestration/dags:/opt/airflow/dags
+    - ../logs/airflow:/opt/airflow/logs
+    - ../:/app
+    - /var/run/docker.sock:/var/run/docker.sock
+  user: "0:0"
+  networks:
+    - bigdata-net
+
+services:
+  airflow-db:
+    image: postgres:15-alpine
+    container_name: airflow-db
+    hostname: airflow-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: airflow
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+    volumes:
+      - airflow_db:/var/lib/postgresql/data
+    networks:
+      - bigdata-net
+
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow-init
+    depends_on:
+      - airflow-db
+    command:
+      - bash
+      - -c
+      - |
+        airflow db migrate
+        airflow users create \
+          --username admin \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@olist.com \
+          --password admin || true
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: airflow-webserver
+    hostname: airflow-webserver
+    restart: unless-stopped
+    depends_on:
+      - airflow-db
+      - airflow-init
+    ports:
+      - "8089:8080"
+    command: webserver
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: airflow-scheduler
+    hostname: airflow-scheduler
+    restart: unless-stopped
+    depends_on:
+      - airflow-db
+      - airflow-init
+    command: scheduler
+
+volumes:
+  airflow_db:
+
+networks:
+  bigdata-net:
+    external: true
+    name: bigdata-net
