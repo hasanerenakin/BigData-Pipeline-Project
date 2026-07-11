@@ -1,292 +1,434 @@
-﻿# Olist Big Data Analytics Pipeline Report
+﻿# Re-Construct Data Pipeline Report
 
-## 1. Project Goal
+## 1. Introduction
 
-The goal of this project is to build an end-to-end big data analytics pipeline using the Olist Brazilian E-Commerce dataset.
+This report explains the reconstruction of the Olist Big Data Analytics Pipeline.
 
-The pipeline ingests raw CSV files, processes them with Apache Spark, stores the processed data in Parquet format on HDFS, exposes the data as Spark SQL tables, and visualizes the results using Apache Superset.
+The original project processed the Olist Brazilian E-Commerce CSV files with Apache Spark, stored the outputs as Parquet files on HDFS, registered Spark SQL tables, and visualized the results in Apache Superset.
 
-This project demonstrates how raw e-commerce data can be transformed into useful analytical information.
+In this reconstruction phase, the pipeline was extended with two major components:
 
-## 2. Dataset
+1. **Apache Airflow** was integrated as the orchestration layer.
+2. **dbt** was implemented as the transformation and analytical modeling layer.
 
-The project uses the Olist Brazilian E-Commerce public dataset.
+With these additions, the project was restructured into a more modular and maintainable architecture based on the **Medallion Architecture**: Bronze, Silver, and Gold layers.
 
-The input data consists of 9 CSV files:
+The updated pipeline flow is:
 
-- olist_customers_dataset.csv
-- olist_geolocation_dataset.csv
-- olist_order_items_dataset.csv
-- olist_order_payments_dataset.csv
-- olist_order_reviews_dataset.csv
-- olist_orders_dataset.csv
-- olist_products_dataset.csv
-- olist_sellers_dataset.csv
-- product_category_name_translation.csv
+```text
+Raw Olist CSV Files
+        ↓
+Apache Spark Ingestion
+        ↓
+HDFS Parquet Storage
+        ↓
+Spark SQL External Tables
+        ↓
+dbt Bronze Models
+        ↓
+dbt Silver Models
+        ↓
+dbt Gold Star Schema Models
+        ↓
+Apache Superset Dashboard
+```
 
-These files contain information about customers, orders, order items, payments, reviews, products, sellers, geolocation data, and product category translations.
+---
 
-## 3. Data Quality and Clean Data
+## 2. Apache Airflow Core Components
 
-Clean data means data that is accurate, consistent, complete enough for analysis, correctly typed, and free from unnecessary duplicate records.
+Apache Airflow is used to define, schedule, automate, and monitor workflows as Directed Acyclic Graphs.
 
-For this project, the following data quality points were considered:
+- **DAG**: A DAG defines the complete workflow and the dependency order between pipeline tasks.
+- **Task**: A task is a single unit of work inside a DAG, such as running Spark ingestion or executing dbt models.
+- **Operator**: An operator defines how a task is executed; this project uses `BashOperator` to run Docker, Spark, Beeline, and dbt commands.
+- **Scheduler**: The scheduler decides when DAG runs and tasks should be executed.
+- **Executor**: The executor runs the scheduled tasks; this project uses Airflow with a local execution setup.
+- **Webserver**: The webserver provides the Airflow UI for monitoring DAG runs, task status, and logs.
+- **Metadata Database**: The metadata database stores DAG runs, task states, users, and Airflow configuration information.
 
-- Some columns contain missing values, especially delivery-related timestamp columns.
-- Some tables naturally contain multiple rows for the same business entity. For example, one order can have multiple items and one order can have multiple payments. These are not incorrect duplicates.
-- Product categories are originally in Portuguese, so the translation table is used to make category analysis easier.
-- Date columns are cast to timestamp or date types when used in analytical queries.
-- Delivered order analysis filters out records with missing delivery timestamps.
-- Exact duplicate records should be removed in a production Silver layer if they exist.
+---
 
-Duplicate handling must be done carefully. For example, duplicate `order_id` values in `order_items` are expected because one order can contain multiple products. Therefore, the project does not blindly remove business-valid repeated records. Instead, duplicate checks should focus on the correct grain of each table.
+## 3. Airflow DAG Design
 
-## 4. Pipeline Architecture
+The Airflow DAG file is located at:
 
-The architecture of the project is:
+```text
+orchestration/dags/olist_reconstructed_pipeline.py
+```
 
-Raw CSV files  
-→ Apache Spark  
-→ Parquet files  
-→ HDFS  
-→ Spark SQL Tables  
-→ Apache Superset Dashboard
+The DAG name is:
 
-### Architecture Layers
+```text
+olist_reconstructed_pipeline
+```
 
-The project can be explained using layered data architecture:
+The DAG was designed as a linear workflow because each step depends on the successful output of the previous step. For example, dbt transformations should not run before Spark ingestion and Spark SQL table registration are completed.
 
-### Bronze Layer
+The task order is:
 
-The Bronze layer contains the raw CSV files.
+```text
+check_required_containers
+        ↓
+spark_ingestion_csv_to_hdfs_parquet
+        ↓
+register_external_spark_tables
+        ↓
+dbt_debug_connection
+        ↓
+dbt_run_medallion_models
+        ↓
+dbt_test_gold_models
+        ↓
+register_existing_star_schema_views
+        ↓
+superset_dashboard_ready
+```
 
-Location:
+The DAG is manually triggered using Airflow because this project is developed in a local environment. In a production environment, the DAG could be scheduled daily, weekly, or based on data availability.
 
-data/raw/
+---
 
-This layer keeps the original source data unchanged.
+## 4. Airflow Task Boundaries, Operator Choices, and Resource Configuration
 
-### Silver Layer
+### 4.1 check_required_containers
 
-The Silver layer contains processed Parquet files.
+This task checks whether the required Docker containers are running before the pipeline starts.
 
-Location:
+Required services include:
 
-hdfs://namenode:9000/olist/parquet/
+- HDFS NameNode
+- Spark Master
+- Spark ThriftServer
+- dbt container
+- Superset container
 
-In this layer, CSV files are read by Spark and converted into Parquet format. Parquet is more efficient for analytical queries because it is columnar and compressed.
+**Operator choice:** `BashOperator`
 
-### Gold Layer
+**Reason:** This task executes shell commands such as `docker ps` and `grep`, so BashOperator is simple and appropriate.
 
-The Gold layer contains analytical Spark SQL tables and star schema views.
+**Boundary:** This task does not transform data. It only validates the runtime environment.
 
-Files:
+---
 
-- processing/create_spark_tables.sql
-- processing/create_star_schema_views.sql
+### 4.2 spark_ingestion_csv_to_hdfs_parquet
 
-This layer prepares the data for business questions and dashboard usage.
+This task runs the Spark ingestion script:
 
-### Visualization Layer
-
-Apache Superset is used as the visualization layer.
-
-Dashboard:
-
-Olist Dashboard
-
-## 5. ETL / ELT Approach
-
-This project mainly follows an ETL approach.
-
-ETL means:
-
-Extract → Transform → Load
-
-In this project:
-
-- Extract: Raw Olist CSV files are read from `data/raw/`.
-- Transform: Apache Spark converts CSV files into Parquet format and prepares queryable Spark SQL tables.
-- Load: The processed Parquet data is stored in HDFS and then used by Superset.
-
-The transformation happens before the data is used for dashboarding. Therefore, ETL is a better description for this project.
-
-An ELT approach would load raw data first into a data warehouse or lakehouse and transform it later using SQL-based tools. That approach is also common in modern analytics systems, especially when tools like dbt are used.
-
-## 6. What is dbt?
-
-dbt stands for data build tool.
-
-dbt is used to transform data inside a data warehouse or lakehouse using SQL. It helps analytics engineers create reusable, version-controlled, and testable SQL models.
-
-In a larger version of this project, dbt could be used to:
-
-- Build dimension tables.
-- Build fact tables.
-- Create star schema models.
-- Add data quality tests.
-- Document the analytical model.
-- Manage transformations in a reproducible way.
-
-In this project, Spark SQL files are used instead of dbt, but the logic is similar: raw or processed data is transformed into analytical models that can answer business questions.
-
-## 7. Data Processing
-
-The raw dataset files were placed under:
-
-data/raw/
-
-A Spark processing script was created:
-
+```text
 processing/csv_to_parquet.py
+```
 
-This script reads all 9 CSV files and writes them to HDFS in Parquet format.
+The script reads the 9 Olist CSV files from:
 
-Output path:
+```text
+data/raw/
+```
 
+and writes them as Parquet files to:
+
+```text
 hdfs://namenode:9000/olist/parquet/
+```
 
-The generated Parquet folders are:
+**Operator choice:** `BashOperator`
 
-- /olist/parquet/customers
-- /olist/parquet/geolocation
-- /olist/parquet/orders
-- /olist/parquet/order_items
-- /olist/parquet/order_payments
-- /olist/parquet/order_reviews
-- /olist/parquet/products
-- /olist/parquet/sellers
-- /olist/parquet/category_translation
+**Reason:** The task runs `spark-submit` inside the Spark container.
 
-## 8. Spark SQL Tables
+**Boundary:** This task is responsible only for ingestion and file format conversion. It does not create analytical models.
 
-Spark SQL external tables were created from the Parquet files stored in HDFS.
+**Resource configuration:** Spark is executed with:
 
-SQL file:
+```text
+--master local[*]
+```
 
+This uses available local cores inside the Spark container and is sufficient for the local project environment.
+
+---
+
+### 4.3 register_external_spark_tables
+
+This task runs the SQL file:
+
+```text
 processing/create_spark_tables.sql
+```
 
-Created tables:
+It registers the Parquet outputs as Spark SQL external tables.
 
-- customers
-- geolocation
-- orders
-- order_items
-- order_payments
-- order_reviews
-- products
-- sellers
-- category_translation
+**Operator choice:** `BashOperator`
 
-These tables make it possible to query the processed data using SQL.
+**Reason:** The task runs Beeline against Spark ThriftServer.
 
-## 9. Star Schema Design
+**Boundary:** This task only registers HDFS Parquet folders as queryable Spark SQL tables.
 
-A star schema is an analytical data model that contains fact tables and dimension tables.
+---
 
-Fact tables store measurable business events, such as orders, payments, deliveries, and reviews.
+### 4.4 dbt_debug_connection
 
-Dimension tables store descriptive information, such as customers, products, sellers, payment types, and order statuses.
+This task runs:
 
-The project includes a star schema view script:
+```text
+dbt debug
+```
 
+It validates that dbt can read the project files and connect to Spark ThriftServer.
+
+**Operator choice:** `BashOperator`
+
+**Reason:** dbt is executed inside the `olist-dbt` container.
+
+**Boundary:** This task does not create models. It only validates connection and configuration.
+
+---
+
+### 4.5 dbt_run_medallion_models
+
+This task runs:
+
+```text
+dbt run
+```
+
+It builds the dbt Bronze, Silver, and Gold models.
+
+**Operator choice:** `BashOperator`
+
+**Reason:** dbt transformations are command-line based and run inside the dbt container.
+
+**Boundary:** This is the main transformation step. It is responsible for modular SQL transformations.
+
+---
+
+### 4.6 dbt_test_gold_models
+
+This task runs:
+
+```text
+dbt test
+```
+
+It executes data quality tests defined in dbt `schema.yml`.
+
+Tests include checks such as:
+
+- `not_null`
+- `unique`
+
+**Operator choice:** `BashOperator`
+
+**Reason:** dbt tests are executed using the dbt CLI.
+
+**Boundary:** This task validates the analytical models but does not create new data outputs.
+
+---
+
+### 4.7 register_existing_star_schema_views
+
+This task runs:
+
+```text
 processing/create_star_schema_views.sql
+```
 
-### Dimension Tables
+It refreshes the existing Spark SQL star schema views.
 
-Proposed dimension views:
+**Operator choice:** `BashOperator`
 
-- dim_customer
-- dim_seller
-- dim_product
-- dim_order_status
-- dim_payment_type
+**Reason:** The task executes SQL through Beeline.
 
-### Fact Tables
+**Boundary:** This task keeps compatibility with the earlier Spark SQL star schema views already used by the dashboard.
 
-Proposed fact views:
+---
 
-- fact_order_items
-- fact_payments
-- fact_delivery
-- fact_review_items
+### 4.8 superset_dashboard_ready
 
-### Star Schema Logic
+This task prints a final message indicating that the Superset dashboard layer is ready.
 
-The main business process is e-commerce ordering.
+**Operator choice:** `BashOperator`
 
-- `fact_order_items` supports product category revenue and seller performance analysis.
+**Reason:** It is a lightweight terminal task.
+
+**Boundary:** This task does not refresh Superset automatically; it documents the final stage of the pipeline.
+
+---
+
+## 5. dbt Project and Medallion Architecture
+
+The dbt project is located under:
+
+```text
+dbt_olist/
+```
+
+The dbt models are organized into three layers:
+
+```text
+dbt_olist/models/bronze/
+dbt_olist/models/silver/
+dbt_olist/models/gold/
+```
+
+This structure follows the Medallion Architecture.
+
+---
+
+## 6. Bronze Layer
+
+The Bronze layer represents raw source tables registered in Spark SQL.
+
+Bronze models are close to the original source structure. They do not apply heavy transformations.
+
+Examples:
+
+- `bronze_customers`
+- `bronze_orders`
+- `bronze_order_items`
+- `bronze_order_payments`
+- `bronze_order_reviews`
+- `bronze_products`
+- `bronze_sellers`
+
+The purpose of the Bronze layer is to create a stable raw input boundary for dbt. This makes the rest of the transformations independent from the original table definitions.
+
+---
+
+## 7. Silver Layer
+
+The Silver layer cleans and standardizes the data.
+
+Main operations in the Silver layer include:
+
+- casting numeric columns to correct data types,
+- casting date fields to timestamp types,
+- filtering records with missing primary keys,
+- standardizing city names with lowercase formatting,
+- standardizing state codes with uppercase formatting,
+- preparing product category translations,
+- aggregating geolocation records by zip code prefix.
+
+Examples:
+
+- `silver_customers`
+- `silver_orders`
+- `silver_order_items`
+- `silver_order_payments`
+- `silver_products`
+- `silver_geolocation`
+
+This layer improves data quality and creates a clean boundary between raw data and business-ready models.
+
+---
+
+## 8. Gold Layer and Star Schema
+
+The Gold layer contains analytical models used for reporting and dashboarding.
+
+Dimension models:
+
+- `dim_customer`
+- `dim_seller`
+- `dim_product`
+- `dim_order_status`
+- `dim_payment_type`
+- `dim_geolocation`
+
+Fact models:
+
+- `fact_order_items`
+- `fact_payments`
+- `fact_delivery`
+- `fact_review_items`
+
+The Gold layer follows star schema logic. Fact models contain measurable business events, while dimension models contain descriptive attributes.
+
+For example:
+
 - `fact_payments` supports revenue and payment method analysis.
+- `fact_order_items` supports product category revenue and seller performance analysis.
 - `fact_delivery` supports delivery time analysis.
-- `fact_review_items` supports review score analysis by product category.
+- `fact_review_items` supports review score analysis.
 
-These fact tables share common dimensions such as customer, product, seller, payment type, and order status.
+---
+
+## 9. Medallion Architecture Diagram
+
+```mermaid
+flowchart TD
+    A[Raw Olist CSV Files] --> B[Apache Spark Ingestion]
+    B --> C[HDFS Parquet Storage]
+    C --> D[Spark SQL External Tables]
+
+    D --> E[dbt Bronze Layer]
+    E --> F[dbt Silver Layer]
+    F --> G[dbt Gold Layer]
+
+    G --> H[Fact Models]
+    G --> I[Dimension Models]
+
+    H --> J[Superset Dashboard]
+    I --> J
+
+    K[Apache Airflow DAG] --> B
+    K --> D
+    K --> E
+    K --> F
+    K --> G
+```
+
+---
 
 ## 10. Business Question Mapping
 
-| Business Question | Fact Table | Dimensions |
-|---|---|---|
-| Monthly revenue | fact_payments | Date / order_purchase_timestamp |
-| Revenue by product category | fact_order_items | dim_product |
-| Top-performing sellers | fact_order_items | dim_seller |
-| Sales by customer state | fact_payments | dim_customer |
-| Average delivery time by state | fact_delivery | dim_customer |
-| Payment method trends | fact_payments | dim_payment_type |
-| Average review score by category | fact_review_items | dim_product |
+| Business Question | Model Used |
+|---|---|
+| Monthly revenue | `fact_payments` |
+| Revenue by product category | `fact_order_items` + `dim_product` |
+| Top-performing sellers | `fact_order_items` + `dim_seller` |
+| Sales by customer state | `fact_payments` + `dim_customer` |
+| Average delivery time by state | `fact_delivery` + `dim_customer` |
+| Payment method trends | `fact_payments` + `dim_payment_type` |
+| Average review score by category | `fact_review_items` + `dim_product` |
 
-## 11. Superset Dashboard
+This mapping shows how the Gold layer supports business-oriented dashboard analysis.
 
-Apache Superset was connected to Spark ThriftServer using a Hive connection.
+---
 
-Database connection:
+## 11. Benefits of the Reconstructed Architecture
 
-hive://hive@spark-thriftserver:10000/olist
+The reconstructed architecture provides several benefits.
 
-The dashboard created in Superset is:
+First, Airflow makes the pipeline reproducible and monitorable. Instead of running Spark and dbt commands manually, the full workflow can be executed from a single DAG.
 
-Olist Dashboard
+Second, dbt modularizes the transformation logic. Bronze, Silver, and Gold layers separate raw data access, cleaning logic, and business-facing analytics.
 
-The following charts were created:
+Third, data quality improves through dbt tests. Important identifiers and analytical fields are checked with `not_null` and `unique` tests.
 
-1. Revenue by Payment Type
-2. Orders by Status
-3. Monthly Orders
-4. Payment Method Trends
-5. Monthly Revenue by Top Product Categories
-6. Monthly Orders by Customer State
-7. Monthly Revenue by Customer State
-8. Order Status Trends
-9. Monthly Average Delivery Time by State
-10. Monthly Average Review Score by Category
+Fourth, the star schema structure makes dashboard queries easier and more consistent. Superset can use fact and dimension models instead of complex raw joins.
 
-These charts provide insight into revenue, payment behavior, order trends, product categories, customer states, delivery performance, and review scores.
+Finally, the architecture is easier to extend. New business questions can be answered by adding new dbt models or extending the Gold layer.
 
-## 12. Technologies Used
+---
 
-The following technologies were used:
+## 12. Challenging Parts of the Reconstruction
 
-- Docker
-- Apache Spark
-- HDFS
-- Spark SQL
-- Spark ThriftServer
-- Apache Superset
-- Python
-- SQL
-- Parquet
+The first challenge was connecting multiple containers. Airflow, dbt, Spark, HDFS, and Superset needed to communicate through the same Docker network.
 
-## 13. Notes
+The second challenge was integrating dbt with Spark. dbt connects to Spark through Spark ThriftServer, so the Spark SQL external tables had to be created before dbt models could run.
 
-Docker was used to run the required services locally.
+The third challenge was defining clean data boundaries. Bronze, Silver, and Gold layers needed clear responsibilities to avoid mixing raw data, cleaned data, and business-ready data.
 
-The raw dataset files are not committed to GitHub because they are large and should remain under data/raw locally.
+The fourth challenge was preserving compatibility with the existing dashboard. The previous Spark SQL star schema views were kept and refreshed so that the Superset dashboard could continue working.
 
-Only the processing scripts, SQL files, report files, and visualization materials are included in the repository.
+The fifth challenge was designing the correct grain for fact models. For example, repeated `order_id` values in `order_items` are valid because one order can contain multiple products. Therefore, duplicate handling must be based on business meaning, not only on repeated IDs.
 
-## 14. Conclusion
+---
 
-This project successfully implements an end-to-end big data analytics pipeline.
+## 13. Conclusion
 
-Raw Olist CSV files were ingested, converted to Parquet using Spark, stored in HDFS, exposed as Spark SQL tables, modeled with star schema views, and visualized in Superset.
+The Olist Big Data Analytics Pipeline was successfully reconstructed with Apache Airflow and dbt.
 
-The final dashboard provides useful insights into orders, revenue, payment methods, product categories, customer locations, delivery performance, and customer reviews.
+Airflow now orchestrates Spark ingestion, Spark SQL table registration, dbt transformations, dbt tests, and dashboard readiness. dbt organizes the transformation layer into Bronze, Silver, and Gold models. The Gold layer provides star schema models that support business intelligence use cases in Superset.
+
+This reconstruction makes the pipeline more automated, modular, maintainable, and suitable for analytical reporting.

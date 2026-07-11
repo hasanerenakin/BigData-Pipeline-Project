@@ -1,46 +1,50 @@
-# 🛒 Olist Big Data Analytics Pipeline
+﻿# 🛒 Olist Big Data Analytics Pipeline
 
 Bu proje, **Olist Brazilian E-Commerce** veri seti kullanılarak geliştirilmiş uçtan uca bir **Big Data Analytics Pipeline** çalışmasıdır.
 
-Proje kapsamında ham CSV dosyaları Apache Spark ile okunmuş, Parquet formatına dönüştürülmüş, HDFS üzerinde saklanmış, Spark SQL tabloları ve star schema view'ları oluşturulmuş ve Apache Superset üzerinden görselleştirilmiştir.
+Proje başlangıçta Spark, HDFS ve Superset kullanılarak kurulmuş; sonrasında Apache Airflow ve dbt eklenerek yeniden yapılandırılmıştır.
+
+Güncel pipeline; ham CSV verisini Spark ile işler, HDFS üzerinde Parquet olarak saklar, dbt ile Bronze / Silver / Gold katmanlarına ayırır, Gold katmanda star schema mantığında fact ve dimension modelleri oluşturur ve sonuçları Apache Superset dashboard'u ile görselleştirir.
 
 ---
 
-## 📌 Proje Amacı
-
-Bu projenin amacı, ham e-ticaret verilerini analiz edilebilir hale getiren bir veri pipeline mimarisi kurmaktır.
-
-Pipeline akışı:
+## 📌 Güncel Pipeline Akışı
 
 ```text
-Raw CSV Files
-      ↓
-Apache Spark
-      ↓
-Parquet Files
-      ↓
-HDFS
-      ↓
-Spark SQL Tables
-      ↓
-Star Schema Views
-      ↓
+Raw Olist CSV Files
+        ↓
+Apache Spark Ingestion
+        ↓
+HDFS Parquet Storage
+        ↓
+Spark SQL External Tables
+        ↓
+dbt Bronze Models
+        ↓
+dbt Silver Models
+        ↓
+dbt Gold Star Schema Models
+        ↓
 Apache Superset Dashboard
 ```
-
-Bu yapı sayesinde siparişler, ödemeler, ürün kategorileri, müşteri lokasyonları, teslimat performansı ve yorum skorları analiz edilebilir hale getirilmiştir.
 
 ---
 
 ## 📊 Dashboard Ön İzleme
 
-Projede oluşturulan Superset dashboard'u aşağıdaki gibidir:
+### Olist Dashboard
 
-![Olist Dashboard 1](visualization/screenshots/all_dashboard_1.png)
+![Dashboard 1](visualization/screenshots/all_dashboard_1.png)
 
-![Olist Dashboard 2](visualization/screenshots/all_dashboard_2.png)
+![Dashboard 2](visualization/screenshots/all_dashboard_2.png)
 
-![Olist Dashboard 3](visualization/screenshots/all_dashboard_3.png)
+![Dashboard 3](visualization/screenshots/all_dashboard_3.png)
+
+### Airflow DAG Success
+
+![Airflow DAG Success](visualization/screenshots/airflow_dag_success.png)
+
+![Airflow DAG Success 2](visualization/screenshots/airflow_dag_success_2.png)
 
 ---
 
@@ -52,6 +56,8 @@ Projede oluşturulan Superset dashboard'u aşağıdaki gibidir:
 - Spark SQL
 - Spark ThriftServer
 - Apache Superset
+- Apache Airflow
+- dbt
 - Python
 - SQL
 - Parquet
@@ -81,214 +87,70 @@ Ham veri dosyaları şu klasöre yerleştirilmelidir:
 data/raw/
 ```
 
-> Not: Ham CSV dosyaları büyük olduğu için GitHub repository içerisine eklenmemelidir. Bu klasör `.gitignore` ile hariç tutulmuştur.
+> Ham CSV dosyaları büyük olduğu için GitHub repository içerisine eklenmemiştir.
 
 ---
 
-## 🏗️ Mimari Katmanlar
+## 🏗️ Medallion Architecture
 
-Projede katmanlı bir veri mimarisi kullanılmıştır.
+Projede dbt ile **Bronze / Silver / Gold** katmanlı Medallion Architecture uygulanmıştır.
 
 ### Bronze Layer
 
-Ham veri katmanıdır.
+Bronze katmanı, Spark SQL üzerinde kayıtlı ham kaynak tablolarını temsil eder.
 
-Bu katmanda Kaggle'dan indirilen orijinal CSV dosyaları tutulur.
+Konum:
 
 ```text
-data/raw/
+dbt_olist/models/bronze/
 ```
+
+Bu katman ham veri yapısını korur ve downstream dönüşümler için sabit kaynak görevi görür.
 
 ### Silver Layer
 
-İşlenmiş veri katmanıdır.
+Silver katmanı temizlenmiş ve standartlaştırılmış veriyi temsil eder.
 
-Apache Spark, CSV dosyalarını okuyarak Parquet formatına dönüştürür ve HDFS üzerine yazar.
+Konum:
 
 ```text
-hdfs://namenode:9000/olist/parquet/
+dbt_olist/models/silver/
 ```
+
+Bu katmanda:
+
+- tarih kolonları timestamp formatına dönüştürülür,
+- sayısal kolonlar uygun tiplere cast edilir,
+- eksik anahtarlar filtrelenir,
+- şehir ve eyalet alanları standartlaştırılır,
+- kategori çeviri tablosu analize uygun hale getirilir.
 
 ### Gold Layer
 
-Analitik sorgular ve dashboard için hazırlanan katmandır.
+Gold katmanı iş zekası ve dashboard için hazırlanmış analitik modelleri içerir.
 
-Bu katmanda Spark SQL tabloları ve star schema view'ları oluşturulur.
-
-İlgili dosyalar:
-
-- `processing/create_spark_tables.sql`
-- `processing/create_star_schema_views.sql`
-
-### Visualization Layer
-
-Apache Superset kullanılarak dashboard ve grafikler oluşturulmuştur.
-
-Dashboard adı:
+Konum:
 
 ```text
-Olist Dashboard
+dbt_olist/models/gold/
 ```
 
----
-
-## 📂 Proje Klasör Yapısı
-
-```text
-BigData-Pipeline-Project/
-├── docker/
-│   ├── docker-compose-dev.yml
-│   ├── docker-compose-hdfs.yml
-│   ├── docker-compose-minio.yml
-│   ├── docker-compose-spark.yml
-│   ├── docker-compose-superset.yml
-│   ├── Dockerfile.dev
-│   └── Dockerfile.superset
-│
-├── processing/
-│   ├── analysis.py
-│   ├── csv_to_parquet.py
-│   ├── create_spark_tables.sql
-│   └── create_star_schema_views.sql
-│
-├── reports/
-│   └── REPORT.md
-│
-├── scripts/
-│   ├── download_dataset.py
-│   ├── setup_network.ps1
-│   └── setup_network.sh
-│
-├── visualization/
-│   ├── register_tables.py
-│   └── screenshots/
-│
-├── .gitignore
-└── README.md
-```
-
----
-
-## 🚀 Projeyi Çalıştırma
-
-### 1. Docker Network Oluşturma
-
-Windows PowerShell için:
-
-```powershell
-.\scripts\setup_network.ps1
-```
-
-Alternatif olarak manuel şekilde:
-
-```powershell
-docker network create bigdata-net
-```
-
----
-
-### 2. Servisleri Başlatma
-
-```powershell
-docker compose -f docker/docker-compose-hdfs.yml up -d
-docker compose -f docker/docker-compose-spark.yml up -d
-docker compose -f docker/docker-compose-superset.yml up -d
-```
-
----
-
-### 3. Servisleri Kontrol Etme
-
-| Servis | URL |
-|---|---|
-| HDFS NameNode | http://localhost:9870 |
-| Spark Master | http://localhost:8080 |
-| Apache Superset | http://localhost:8088 |
-
-Superset giriş bilgileri:
-
-```text
-username: admin
-password: admin
-```
-
----
-
-## ⚙️ Veri İşleme Süreci
-
-### 1. CSV Dosyalarını Parquet Formatına Dönüştürme
-
-Aşağıdaki script, `data/raw/` klasöründeki 9 CSV dosyasını okur ve HDFS üzerine Parquet formatında yazar.
-
-```powershell
-docker exec -it spark-master /spark/bin/spark-submit --master local[*] /app/processing/csv_to_parquet.py
-```
-
-Çıktı konumu:
-
-```text
-hdfs://namenode:9000/olist/parquet/
-```
-
-Oluşturulan Parquet klasörleri:
-
-- `/olist/parquet/customers`
-- `/olist/parquet/geolocation`
-- `/olist/parquet/orders`
-- `/olist/parquet/order_items`
-- `/olist/parquet/order_payments`
-- `/olist/parquet/order_reviews`
-- `/olist/parquet/products`
-- `/olist/parquet/sellers`
-- `/olist/parquet/category_translation`
-
----
-
-### 2. Spark SQL Tablolarını Oluşturma
-
-Parquet dosyalarından Spark SQL external tablolarını oluşturmak için:
-
-```powershell
-docker exec -it spark-thriftserver /spark/bin/beeline -u jdbc:hive2://localhost:10000/default -f /app/processing/create_spark_tables.sql
-```
-
-Oluşturulan temel tablolar:
-
-- `customers`
-- `geolocation`
-- `orders`
-- `order_items`
-- `order_payments`
-- `order_reviews`
-- `products`
-- `sellers`
-- `category_translation`
-
----
-
-### 3. Star Schema View'larını Oluşturma
-
-Analitik sorgular için star schema mantığında fact ve dimension view'ları oluşturmak için:
-
-```powershell
-docker exec -it spark-thriftserver /spark/bin/beeline -u jdbc:hive2://localhost:10000/default -f /app/processing/create_star_schema_views.sql
-```
+Bu katmanda star schema mantığında fact ve dimension modelleri oluşturulur.
 
 ---
 
 ## ⭐ Star Schema Veri Modeli
 
-Projede iş zekası sorgularını kolaylaştırmak için star schema mantığı kullanılmıştır.
-
-### Dimension Views
+### Dimension Models
 
 - `dim_customer`
 - `dim_seller`
 - `dim_product`
 - `dim_order_status`
 - `dim_payment_type`
+- `dim_geolocation`
 
-### Fact Views
+### Fact Models
 
 - `fact_order_items`
 - `fact_payments`
@@ -322,12 +184,12 @@ erDiagram
         int product_width_cm
     }
 
-    DIM_ORDER_STATUS {
-        string order_status
-    }
-
     DIM_PAYMENT_TYPE {
         string payment_type
+    }
+
+    DIM_ORDER_STATUS {
+        string order_status
     }
 
     FACT_ORDER_ITEMS {
@@ -360,7 +222,6 @@ erDiagram
         string order_status
         timestamp order_purchase_timestamp
         timestamp order_delivered_customer_date
-        timestamp order_estimated_delivery_date
         int delivery_days
     }
 
@@ -393,11 +254,106 @@ erDiagram
 
 ---
 
+## 🔁 Airflow Orchestration
+
+Pipeline, Apache Airflow ile orkestre edilmiştir.
+
+DAG dosyası:
+
+```text
+orchestration/dags/olist_reconstructed_pipeline.py
+```
+
+DAG adı:
+
+```text
+olist_reconstructed_pipeline
+```
+
+Airflow DAG sırasıyla şu işleri çalıştırır:
+
+1. Gerekli container'ları kontrol eder.
+2. Spark ingestion job'ını çalıştırır.
+3. HDFS Parquet çıktılarından Spark SQL external tablolarını oluşturur.
+4. dbt bağlantısını test eder.
+5. dbt Bronze / Silver / Gold modellerini çalıştırır.
+6. dbt testlerini çalıştırır.
+7. Mevcut Spark SQL star schema view'larını yeniler.
+8. Superset dashboard katmanının hazır olduğunu bildirir.
+
+Airflow arayüzü:
+
+```text
+http://localhost:8089
+```
+
+Giriş bilgileri:
+
+```text
+admin / admin
+```
+
+---
+
+## 🚀 Projeyi Çalıştırma
+
+### 1. Docker Network Oluşturma
+
+```powershell
+.\scripts\setup_network.ps1
+```
+
+Alternatif:
+
+```powershell
+docker network create bigdata-net
+```
+
+### 2. Temel Servisleri Başlatma
+
+```powershell
+docker compose -f docker/docker-compose-hdfs.yml up -d
+docker compose -f docker/docker-compose-spark.yml up -d
+docker compose -f docker/docker-compose-superset.yml up -d
+```
+
+### 3. dbt Servisini Başlatma
+
+```powershell
+docker compose -f docker/docker-compose-dbt.yml up -d --build
+```
+
+### 4. Airflow Servisini Başlatma
+
+```powershell
+docker compose -f docker/docker-compose-airflow.yml up -d --build
+```
+
+### 5. dbt Kontrol Komutları
+
+```powershell
+docker exec -it olist-dbt dbt debug --project-dir /app/dbt_olist --profiles-dir /app/dbt_olist
+docker exec -it olist-dbt dbt run --project-dir /app/dbt_olist --profiles-dir /app/dbt_olist
+docker exec -it olist-dbt dbt test --project-dir /app/dbt_olist --profiles-dir /app/dbt_olist
+```
+
+---
+
 ## 📊 Superset Dashboard
 
-Apache Superset, Spark ThriftServer'a Hive bağlantısı üzerinden bağlanmıştır.
+Superset adresi:
 
-Bağlantı URI:
+```text
+http://localhost:8088
+```
+
+Giriş bilgileri:
+
+```text
+admin / admin
+```
+
+Superset, Spark ThriftServer'a şu URI ile bağlanmıştır:
 
 ```text
 hive://hive@spark-thriftserver:10000/olist
@@ -409,7 +365,7 @@ Dashboard adı:
 Olist Dashboard
 ```
 
-Oluşturulan grafikler:
+Oluşturulan bazı grafikler:
 
 - Revenue by Payment Type
 - Orders by Status
@@ -424,118 +380,86 @@ Oluşturulan grafikler:
 - Revenue by Product Category
 - Sales by Customer State
 - Top Performing Sellers
-- Average Delivery Time by State
-- Average Review Score by Category
-
-Dashboard ekran görüntüleri şu klasörde yer almaktadır:
-
-```text
-visualization/screenshots/
-```
-
----
-
-## 📈 Örnek Dashboard Görselleri
-
-### Revenue by Payment Type
-
-![Revenue by Payment Type](visualization/screenshots/revenue_by_payment_type.png)
-
-### Payment Method Trends
-
-![Payment Method Trends](visualization/screenshots/payment_method_trends.png)
-
-### Monthly Revenue by Top Product Categories
-
-![Monthly Revenue by Top Product Categories](visualization/screenshots/revenue_by_top_product_categories.png)
-
-### Monthly Orders by Customer State
-
-![Monthly Orders by Customer State](visualization/screenshots/monthly_orders_by_customer_state.png)
-
-### Average Delivery Time by State
-
-![Average Delivery Time by State](visualization/screenshots/average_delivery_time_by_state.png)
-
-### Average Review Score by Category
-
-![Average Review Score by Category](visualization/screenshots/average_review_score_by_category.png)
 
 ---
 
 ## 📈 Cevaplanabilen Business Soruları
 
-| Business Question | Kullanılan Fact View | Kullanılan Dimension |
-|---|---|---|
-| Monthly revenue | `fact_payments` | `order_purchase_timestamp` |
-| Revenue by product category | `fact_order_items` | `dim_product` |
-| Top-performing sellers | `fact_order_items` | `dim_seller` |
-| Sales by customer state | `fact_payments` | `dim_customer` |
-| Average delivery time by state | `fact_delivery` | `dim_customer` |
-| Payment method trends | `fact_payments` | `dim_payment_type` |
-| Average review score by category | `fact_review_items` | `dim_product` |
+| Business Question | Kullanılan Model |
+|---|---|
+| Monthly revenue | `fact_payments` |
+| Revenue by product category | `fact_order_items` + `dim_product` |
+| Top-performing sellers | `fact_order_items` + `dim_seller` |
+| Sales by customer state | `fact_payments` + `dim_customer` |
+| Average delivery time by state | `fact_delivery` + `dim_customer` |
+| Payment method trends | `fact_payments` + `dim_payment_type` |
+| Average review score by category | `fact_review_items` + `dim_product` |
 
 ---
 
-## 🧪 Veri Kalitesi Yaklaşımı
-
-Projede veri kalitesi açısından aşağıdaki noktalar dikkate alınmıştır:
-
-- Eksik tarih değerleri teslimat analizlerinde filtrelenmiştir.
-- Ürün kategori isimleri İngilizce karşılıklarıyla eşleştirilmiştir.
-- Tarih kolonları analizlerde timestamp/date formatına dönüştürülmüştür.
-- Tekrarlı görünen bazı kayıtların iş mantığı gereği normal olabileceği dikkate alınmıştır.
-  - Bir siparişin birden fazla ürünü olabilir.
-  - Bir siparişin birden fazla ödeme satırı olabilir.
-- Duplicate kontrolü tablo grain'ine göre değerlendirilmelidir.
-
----
-
-## 🔁 ETL / ELT Yaklaşımı
-
-Bu projede ağırlıklı olarak **ETL** yaklaşımı kullanılmıştır.
+## 📂 Proje Klasör Yapısı
 
 ```text
-Extract → Transform → Load
+BigData-Pipeline-Project/
+├── dbt_olist/
+│   ├── dbt_project.yml
+│   ├── profiles.yml
+│   └── models/
+│       ├── bronze/
+│       ├── silver/
+│       └── gold/
+│
+├── docker/
+│   ├── Dockerfile.airflow
+│   ├── Dockerfile.dbt
+│   ├── docker-compose-airflow.yml
+│   ├── docker-compose-dbt.yml
+│   ├── docker-compose-hdfs.yml
+│   ├── docker-compose-spark.yml
+│   └── docker-compose-superset.yml
+│
+├── orchestration/
+│   └── dags/
+│       └── olist_reconstructed_pipeline.py
+│
+├── processing/
+│   ├── csv_to_parquet.py
+│   ├── create_spark_tables.sql
+│   └── create_star_schema_views.sql
+│
+├── docs/
+│   └── phase3_architecture.md
+│
+├── reports/
+│   └── REPORT.md
+│
+├── visualization/
+│   ├── register_tables.py
+│   └── screenshots/
+│
+└── README.md
 ```
-
-Bu projedeki karşılığı:
-
-- Extract: CSV dosyaları `data/raw/` klasöründen okunur.
-- Transform: Spark ile Parquet formatına dönüştürülür ve SQL tabloları hazırlanır.
-- Load: İşlenmiş veri HDFS üzerine yüklenir ve Superset tarafından sorgulanır.
-
-Modern veri platformlarında ELT yaklaşımı ve dbt gibi araçlar da sık kullanılır. Bu projede dbt kullanılmamıştır; ancak Spark SQL dosyaları ile benzer şekilde analitik modelleme yapılmıştır.
 
 ---
 
 ## 📄 Detaylı Rapor
 
-Detaylı proje raporu:
+Detaylı rapor için:
 
 ```text
 reports/REPORT.md
 ```
 
-Rapor içeriği:
+Phase 3 mimari dokümanı için:
 
-- Proje amacı
-- Veri seti açıklaması
-- Pipeline mimarisi
-- Veri kalitesi
-- ETL / ELT yaklaşımı
-- dbt açıklaması
-- Star schema tasarımı
-- Fact ve dimension tablolar
-- Business question mapping
-- Superset dashboard açıklaması
+```text
+docs/phase3_architecture.md
+```
 
 ---
 
 ## ✅ Sonuç
 
-Bu proje kapsamında Olist e-ticaret veri seti kullanılarak çalışan bir big data analytics pipeline geliştirilmiştir.
+Bu proje, ham Olist CSV verilerini uçtan uca işleyen bir Big Data Analytics Pipeline olarak yeniden yapılandırılmıştır.
 
-Ham CSV verileri Spark ile işlenmiş, Parquet formatında HDFS üzerinde saklanmış, Spark SQL tabloları ve star schema view'ları oluşturulmuş ve Apache Superset üzerinde görselleştirilmiştir.
-
-Sonuç olarak ham veri, iş kararlarını destekleyen analiz edilebilir dashboard çıktısına dönüştürülmüştür.
+Spark ingestion, HDFS Parquet storage, dbt Medallion Architecture, Airflow orchestration ve Superset dashboard bileşenleri birlikte çalışacak şekilde entegre edilmiştir.
